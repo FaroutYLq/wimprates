@@ -48,6 +48,16 @@ for _k, _v in s_data.items():
                                        bounds_error=False, fill_value=0)
 
 
+def _warn_momentum_dependence(erec_kwargs):
+    """If only one of the two parameters is given, warn the user
+    that momentum dependence is NOT being used.
+    :param erec_kwargs: dictionary of parameters for sigma_erec, contain n and q_ref
+    """
+    if (erec_kwargs['n'] is None) != (erec_kwargs['q_ref'] is None):
+        raise ValueError("Both n and q_ref should be given for momentum dependent models. \
+                         Now n=%s, q_ref=%s"%(erec_kwargs['n'], erec_kwargs['q_ref']))
+
+
 @export
 def reduced_mass(m1, m2):
     return m1 * m2 / (m1 + m2)
@@ -251,6 +261,7 @@ def rate_elastic(erec, mw, sigma_nucleon, interaction='SI',
         "n": kwargs.get("n", None),
         "q_ref": kwargs.get("q_ref", None)
     }
+    _warn_momentum_dependence(erec_kwargs)
     quad_kwargs = {k: v for k, v in kwargs.items() if k not in erec_kwargs}
 
     def integrand(v):
