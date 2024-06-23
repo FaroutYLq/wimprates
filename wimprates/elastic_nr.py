@@ -18,6 +18,10 @@ ATOMIC_WEIGHT = dict(
     Si=28.0855
 )
 
+# Reference momentum for MDDM: 100 MeV/c
+# Reference: https://arxiv.org/pdf/0908.3192 Eq. 10
+Q_REF = 100000 * nu.MeV / nu.c0
+
 
 @export
 def mn(material='Xe'):
@@ -115,7 +119,7 @@ def helm_form_factor_squared(erec, anucl):
 @export
 def sigma_erec(erec, v, mw, sigma_nucleon,
                interaction='SI', m_med=float('inf'),
-               material='Xe'):
+               material='Xe', n=0, q_ref=Q_REF):
     """Differential elastic WIMP-nucleus cross section
     (dependent on recoil energy and wimp-earth speed v)
 
@@ -127,6 +131,8 @@ def sigma_erec(erec, v, mw, sigma_nucleon,
     See rate_wimps for options.
     :param m_med: Mediator mass. If not given, assumed much heavier than mw.
     :param material: name of the detection material (default is 'Xe')
+    :param n: power of the q dependence for MDDM, default to 0
+    :param q_ref: reference momentum for MDDM, default to 100 MeV/c
     """
     if interaction == 'SI':
         sigma_nucleus = (sigma_nucleon
@@ -163,16 +169,35 @@ def sigma_erec(erec, v, mw, sigma_nucleon,
         raise ValueError("Unsupported DM-nucleus interaction '%s'"
                          % interaction)
 
-    return result * mediator_factor(erec, m_med, material)
+    result *= mediator_factor(erec, m_med, material)
+    result *= extra_momentum_factor(erec, m_med, material, n=n, q_ref=q_ref)
+
+    return result
 
 
 @export
 def mediator_factor(erec, m_med, material):
     if m_med == float('inf'):
         return 1
-    q = (2 * mn(material) * erec)**0.5
+    q = (2 * mn(material) * erec)**0.5 # in unit of GeV/c
     return m_med**4 / (m_med**2 + (q/nu.c0)**2) ** 2
 
+@export
+def extra_momentum_factor(erec, m_med, material, n=0, q_ref=Q_REF):
+    """
+    Extra momentum dependence for Momentum Dependent DM (MDDM)
+    Reference: https://arxiv.org/pdf/0908.3192 Eq. 10
+    :param erec: recoil energy
+    :param m_med: mediator mass
+    :param material: name of the detection material
+    :param n: power of the q dependence, default to 0
+    :param q_ref: reference momentum, default to 100 MeV/c
+    """
+    q = (2 * mn(material) * erec)**0.5 # in unit of GeV/c
+    q = q/nu.c0 # in unit of GeV
+    q_ref = q_ref/nu.c0 # in unit of GeV
+
+    return (q / q_ref)**(2*n) * ((q_ref**2 + m_med**2)/(q**2 + m_med**2))
 
 @export
 def vmin_elastic(erec, mw, material):
