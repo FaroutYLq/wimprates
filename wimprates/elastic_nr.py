@@ -18,9 +18,9 @@ ATOMIC_WEIGHT = dict(
     Si=28.0855
 )
 
-# Reference momentum for MDDM: 100 MeV/c
+# Reference momentum for MDDM: 10MeV/c
 # Reference: https://arxiv.org/pdf/0908.3192 Eq. 10
-Q_REF = 100000 * nu.MeV / nu.c0
+Q_REF = 10000 * nu.MeV / nu.c0
 
 
 @export
@@ -119,7 +119,7 @@ def helm_form_factor_squared(erec, anucl):
 @export
 def sigma_erec(erec, v, mw, sigma_nucleon,
                interaction='SI', m_med=float('inf'),
-               material='Xe', n=0, q_ref=Q_REF):
+               material='Xe', n=None, q_ref=None):
     """Differential elastic WIMP-nucleus cross section
     (dependent on recoil energy and wimp-earth speed v)
 
@@ -131,8 +131,8 @@ def sigma_erec(erec, v, mw, sigma_nucleon,
     See rate_wimps for options.
     :param m_med: Mediator mass. If not given, assumed much heavier than mw.
     :param material: name of the detection material (default is 'Xe')
-    :param n: power of the q dependence for MDDM, default to 0
-    :param q_ref: reference momentum for MDDM, default to 100 MeV/c
+    :param n: power of the q dependence for MDDM, default to None
+    :param q_ref: reference momentum for MDDM, default to None
     """
     if interaction == 'SI':
         sigma_nucleus = (sigma_nucleon
@@ -170,7 +170,8 @@ def sigma_erec(erec, v, mw, sigma_nucleon,
                          % interaction)
 
     result *= mediator_factor(erec, m_med, material)
-    result *= extra_momentum_factor(erec, m_med, material, n=n, q_ref=q_ref)
+    if (n is not None) and (q_ref is not None):
+        result *= extra_momentum_factor(erec, m_med, material, n=n, q_ref=q_ref)
 
     return result
 
@@ -191,13 +192,16 @@ def extra_momentum_factor(erec, m_med, material, n=0, q_ref=Q_REF):
     :param m_med: mediator mass
     :param material: name of the detection material
     :param n: power of the q dependence, default to 0
-    :param q_ref: reference momentum, default to 100 MeV/c
+    :param q_ref: reference momentum, default to 10 MeV/c
     """
     q = (2 * mn(material) * erec)**0.5 # in unit of GeV/c
     q = q/nu.c0 # in unit of GeV
-    q_ref = q_ref/nu.c0 # in unit of GeV
+    q_ref = q_ref*nu.MeV/nu.c0 / nu.GeV # in unit of GeV
 
-    return (q / q_ref)**(2*n) * ((q_ref**2 + m_med**2)/(q**2 + m_med**2))
+    if m_med == float('inf'):
+        return (q / q_ref)**(2*n)
+    else:
+        return (q / q_ref)**(2*n) * ((q_ref**2 + m_med**2)/(q**2 + m_med**2))
 
 @export
 def vmin_elastic(erec, mw, material):
@@ -243,12 +247,18 @@ def rate_elastic(erec, mw, sigma_nucleon, interaction='SI',
     if v_min >= wr.v_max(t, halo_model.v_esc):
         return 0
 
+    erec_kwargs = {
+        "n": kwargs.get("n", None),
+        "q_ref": kwargs.get("q_ref", None)
+    }
+    quad_kwargs = {k: v for k, v in kwargs.items() if k not in erec_kwargs}
+
     def integrand(v):
         return (sigma_erec(erec, v, mw, sigma_nucleon,
-                           interaction, m_med, material=material) * v
+                           interaction, m_med, material=material, **erec_kwargs) * v
                 * halo_model.velocity_dist(v, t))
 
     return halo_model.rho_dm / mw * (1 / mn(material)) * quad(
         integrand,
         v_min, wr.v_max(t, halo_model.v_esc),
-        **kwargs)[0]
+        **quad_kwargs)[0]
