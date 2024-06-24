@@ -18,6 +18,10 @@ ATOMIC_WEIGHT = dict(
     Si=28.0855
 )
 
+# Reference momentum for MDDM: 10MeV/c
+# Reference: https://arxiv.org/pdf/0908.3192 Eq. 10
+Q_REF = 10000 * nu.MeV / nu.c0
+
 
 @export
 def mn(material='Xe'):
@@ -42,6 +46,16 @@ for _k, _v in s_data.items():
         continue
     structure_functions[_k] = interp1d(s_energies, _v,
                                        bounds_error=False, fill_value=0)
+
+
+def _warn_momentum_dependence(erec_kwargs):
+    """If only one of the two parameters is given, warn the user
+    that momentum dependence is NOT being used.
+    :param erec_kwargs: dictionary of parameters for sigma_erec, contain n and q_ref
+    """
+    if (erec_kwargs['n'] is None) != (erec_kwargs['q_ref'] is None):
+        raise ValueError("Both n and q_ref should be given for momentum dependent models. \
+                         Now n=%s, q_ref=%s"%(erec_kwargs['n'], erec_kwargs['q_ref']))
 
 
 @export
@@ -115,7 +129,7 @@ def helm_form_factor_squared(erec, anucl):
 @export
 def sigma_erec(erec, v, mw, sigma_nucleon,
                interaction='SI', m_med=float('inf'),
-               material='Xe'):
+               material='Xe', n=None, q_ref=None):
     """Differential elastic WIMP-nucleus cross section
     (dependent on recoil energy and wimp-earth speed v)
 
@@ -127,6 +141,8 @@ def sigma_erec(erec, v, mw, sigma_nucleon,
     See rate_wimps for options.
     :param m_med: Mediator mass. If not given, assumed much heavier than mw.
     :param material: name of the detection material (default is 'Xe')
+    :param n: power of the q dependence for MDDM, default to None
+    :param q_ref: reference momentum for MDDM, default to None
     """
     if interaction == 'SI':
         sigma_nucleus = (sigma_nucleon
@@ -163,16 +179,39 @@ def sigma_erec(erec, v, mw, sigma_nucleon,
         raise ValueError("Unsupported DM-nucleus interaction '%s'"
                          % interaction)
 
-    return result * mediator_factor(erec, m_med, material)
+    result *= mediator_factor(erec, m_med, material)
+    if (n is not None) and (q_ref is not None):
+        result *= extra_momentum_factor(erec, m_med, material, n=n, q_ref=q_ref)
+
+    return result
 
 
 @export
 def mediator_factor(erec, m_med, material):
     if m_med == float('inf'):
         return 1
-    q = (2 * mn(material) * erec)**0.5
+    q = (2 * mn(material) * erec)**0.5 # in unit of GeV/c
     return m_med**4 / (m_med**2 + (q/nu.c0)**2) ** 2
 
+@export
+def extra_momentum_factor(erec, m_med, material, n=0, q_ref=Q_REF):
+    """
+    Extra momentum dependence for Momentum Dependent DM (MDDM)
+    Reference: https://arxiv.org/pdf/0908.3192 Eq. 10
+    :param erec: recoil energy
+    :param m_med: mediator mass
+    :param material: name of the detection material
+    :param n: power of the q dependence, default to 0
+    :param q_ref: reference momentum, default to 10 MeV/c
+    """
+    q = (2 * mn(material) * erec)**0.5 # in unit of GeV/c
+    q = q/nu.c0 # in unit of GeV
+    q_ref = q_ref*nu.MeV/nu.c0 / nu.GeV # in unit of GeV
+
+    if m_med == float('inf'):
+        return (q / q_ref)**(2*n)
+    else:
+        return (q / q_ref)**(2*n) * ((q_ref**2 + m_med**2)/(q**2 + m_med**2))
 
 @export
 def vmin_elastic(erec, mw, material):
@@ -218,12 +257,19 @@ def rate_elastic(erec, mw, sigma_nucleon, interaction='SI',
     if v_min >= wr.v_max(t, halo_model.v_esc):
         return 0
 
+    erec_kwargs = {
+        "n": kwargs.get("n", None),
+        "q_ref": kwargs.get("q_ref", None)
+    }
+    _warn_momentum_dependence(erec_kwargs)
+    quad_kwargs = {k: v for k, v in kwargs.items() if k not in erec_kwargs}
+
     def integrand(v):
         return (sigma_erec(erec, v, mw, sigma_nucleon,
-                           interaction, m_med, material=material) * v
+                           interaction, m_med, material=material, **erec_kwargs) * v
                 * halo_model.velocity_dist(v, t))
 
     return halo_model.rho_dm / mw * (1 / mn(material)) * quad(
         integrand,
         v_min, wr.v_max(t, halo_model.v_esc),
-        **kwargs)[0]
+        **quad_kwargs)[0]
